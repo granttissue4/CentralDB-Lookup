@@ -16,12 +16,12 @@ Open the extension while on a Stratus portal tab. It reads the customer name and
 
 ## Features
 
-- 🔍 **Auto-detects** customer name and domain from the active Stratus portal tab
-- ⚡ **Auto-grabs your auth token** from CentralDB using MSAL cache decryption — no manual copy/paste
-- 🟢 **Token status indicator** — shows time remaining before expiry with color-coded dot (green / yellow / red)
-- 🔑 **Manual token fallback** — paste a Bearer token directly if auto-grab fails
-- 📋 **Result cards** — shows company name, billing domain, phone, billing status, and ConnectWise ID
-- 🔄 **Deduplication** — searches by both company name and domain, merges and dedupes results by ID
+- **Auto-detects** customer name and domain from the active Stratus portal tab
+- **Auto-grabs your auth token** from CentralDB using MSAL cache decryption — no manual copy/paste
+- **Token status indicator** — shows time remaining before expiry with color-coded dot (green / yellow / red)
+- **Manual token fallback** — paste a Bearer token directly if auto-grab fails
+- **Result cards** — shows company name, billing domain, phone, billing status, and ConnectWise ID
+- **Deduplication** — searches by both company name and domain, merges and dedupes results by ID
 
 ---
 
