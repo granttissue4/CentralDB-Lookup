@@ -72,7 +72,7 @@ Results are merged and deduplicated by ConnectWise company ID.
 6. The extension icon will appear in your toolbar
 
 ### Firefox
-
+> This portion for this fork is a work in progress, and may not work as intended.
 > This extension is not published to the Firefox Add-ons store. Install it manually using an `.xpi` file.
 
 **Standard Install (Signed XPI)**
