@@ -3,7 +3,7 @@
   "name": "CentralDB Lookup",
   "version": "3.0",
   "description": "Auto-grabs your token from CentralDB and looks up companies from the Stratus portal.",
-  "permissions": ["activeTab", "storage", "scripting"],
+  "permissions": ["activeTab", "storage", "scripting", "contextMenus"],
   "content_scripts": [
     {
       "matches": ["https://centraldb.spectrumvoip.com/*"],

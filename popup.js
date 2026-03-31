@@ -3,7 +3,8 @@ const PORTAL_HOSTS = [
   'st1-web3-cl4.spectrumvoip.com',
   'st1-web4-cl4.spectrumvoip.com',
   'st1-web5-lax.spectrumvoip.com',
-  'st1-web6-dal.spectrumvoip.com'
+  'st1-web6-dal.spectrumvoip.com',
+  'st1-*.spectrumvoip.com'
 ];
 const API_BASE = 'https://centraldb.spectrumvoip.com:8081/api/v1/master-search';
 
@@ -92,15 +93,36 @@ function dedupeById(arr) {
 }
 
 function renderCards(companies, company, domain) {
-  if (!companies.length) return `<div class="msg msg-info">No results for <strong>${company||''}</strong>${domain?` or <strong>${domain}</strong>`:''}</div>`;
-  return companies.map(c => `
-    <div class="result-card">
-      <div class="cname">${c.name}</div>
-      <div class="row">Domain: <span>${c.Billing_Domain||'—'}</span></div>
-      <div class="row">Phone: <span>${c.phoneNumber||'—'}</span></div>
-      <div class="row">Status: <span class="${c.Billing_Status==='OPEN'?'status-open':'status-other'}">${c.Billing_Status||'—'}</span></div>
-      <div class="row">CW ID: <span>${c.id}</span></div>
-    </div>`).join('');
+  if (!companies.length) {
+    const d = document.createElement('div');
+    d.className = 'msg msg-info';
+    d.textContent = `No results for "${company || ''}${domain ? ` or ${domain}` : ''}"`;
+    return d.outerHTML;
+  }
+  return companies.map(c => {
+    const card = document.createElement('div');
+    card.className = 'result-card';
+
+    const t = (val, fallback = '—') => {
+      const s = document.createElement('span');
+      s.textContent = val || fallback;
+      return s.outerHTML;
+    };
+
+    const statusClass = c.Billing_Status === 'OPEN' ? 'status-open' : 'status-other';
+
+    card.innerHTML = `
+      <div class="cname"></div>
+      <div class="row">Domain: ${t(c.Billing_Domain)}</div>
+      <div class="row">Phone: ${t(c.phoneNumber)}</div>
+      <div class="row">Status: <span class="${statusClass}"></span></div>
+      <div class="row">CW ID: ${t(c.id)}</div>`;
+
+    card.querySelector('.cname').textContent = c.name || '—';
+    card.querySelector(`.${statusClass}`).textContent = c.Billing_Status || '—';
+
+    return card.outerHTML;
+  }).join('');
 }
 
 (async () => {
@@ -111,7 +133,22 @@ function renderCards(companies, company, domain) {
 
   const stored = await chrome.storage.local.get('bearerToken');
   let savedToken = stored.bearerToken || null;
+
+  // Evict expired token rather than leaving a stale credential in storage
+  if (savedToken) {
+    try {
+      const { exp } = JSON.parse(atob(savedToken.split('.')[1]));
+      if (exp * 1000 < Date.now()) {
+        await chrome.storage.local.remove('bearerToken');
+        savedToken = null;
+      }
+    } catch(_) {} // non-JWT token — leave it alone
+  }
+
   updateTokenBar(savedToken);
+
+  document.getElementById('tab-search').addEventListener('click', () => switchTab('search'));
+  document.getElementById('tab-token').addEventListener('click', () => switchTab('token'));
 
   document.getElementById('subtitle').textContent = isCentralDB ? 'CentralDB' : isPortal ? 'Stratus Portal' : url.hostname;
 
@@ -121,7 +158,6 @@ function renderCards(companies, company, domain) {
 
   grabBtn.addEventListener('click', async () => {
     if (!isCentralDB) {
-      // Try anyway from whatever tab we're on — won't work but show helpful message
       tokenMsg.innerHTML = `<div class="msg msg-error">❌ You need to be on the CentralDB tab to grab the token.</div>`;
       return;
     }
@@ -134,10 +170,12 @@ function renderCards(companies, company, domain) {
       updateTokenBar(token);
       tokenMsg.innerHTML = `<div class="msg msg-success">✅ Token grabbed automatically!</div>`;
       grabBtn.textContent = '⚡ Grab Again';
-      // Auto switch to search if on portal
       setTimeout(() => switchTab('search'), 1000);
     } catch(e) {
-      tokenMsg.innerHTML = `<div class="msg msg-error">❌ ${e.message}</div>`;
+      const errDiv = document.createElement('div');
+      errDiv.className = 'msg msg-error';
+      errDiv.textContent = `❌ ${e.message}`;
+      tokenMsg.replaceChildren(errDiv);
       grabBtn.textContent = '⚡ Try Again';
     }
     grabBtn.disabled = false;
@@ -177,7 +215,31 @@ function renderCards(companies, company, domain) {
   // ── Search panel ──────────────────────────────────────────
   const searchContent = document.getElementById('search-content');
 
-  if (!isPortal) {
+  // Pick up any recent context menu search results (within last 60s)
+  const { pendingSearch, contextMenuResults } = await chrome.storage.local.get(['pendingSearch', 'contextMenuResults']);
+
+  if (pendingSearch) {
+    chrome.storage.local.remove('pendingSearch');
+  }
+
+  if (contextMenuResults && Date.now() - contextMenuResults.timestamp < 60000) {
+      chrome.storage.local.remove('contextMenuResults');
+      chrome.action.setBadgeText({ text: '' }); // ← add this line
+      switchTab('search');
+    searchContent.innerHTML = `
+      <div class="info-box">
+        <div class="lbl">Context menu search</div>
+        <div class="val"></div>
+      </div>
+      <div id="results"></div>`;
+    // textContent for query — never innerHTML
+    searchContent.querySelector('.val').textContent = contextMenuResults.query;
+    searchContent.querySelector('#results').innerHTML = renderCards(
+      contextMenuResults.results,
+      contextMenuResults.query,
+      null
+    );
+  } else if (!isPortal) {
     searchContent.innerHTML = `<div class="msg msg-info">Navigate to a <strong>Stratus portal</strong> tab to search.</div>`;
   } else if (!savedToken) {
     searchContent.innerHTML = `<div class="msg msg-info">No token saved. Go to CentralDB tab and click the <strong>Token tab → Grab Token</strong>.</div>`;
@@ -213,6 +275,21 @@ function renderCards(companies, company, domain) {
       const resultsEl = document.getElementById('results');
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span>Searching...';
+
+      // Token expiry preflight
+      try {
+        const { exp } = JSON.parse(atob(savedToken.split('.')[1]));
+        if (exp * 1000 < Date.now()) {
+          const errDiv = document.createElement('div');
+          errDiv.className = 'msg msg-error';
+          errDiv.textContent = '⚠️ Token is expired. Grab a fresh one from the Token tab.';
+          resultsEl.replaceChildren(errDiv);
+          btn.disabled = false;
+          btn.textContent = '🔍 Search Again';
+          return;
+        }
+      } catch(_) {}
+
       try {
         const [byName, byDomain] = await Promise.all([
           company ? searchAPI(company, savedToken) : Promise.resolve([]),
@@ -220,7 +297,10 @@ function renderCards(companies, company, domain) {
         ]);
         resultsEl.innerHTML = renderCards(dedupeById([...byName, ...byDomain]), company, domain);
       } catch(e) {
-        resultsEl.innerHTML = `<div class="msg msg-error">❌ ${e.message}<br/>Try grabbing a fresh token.</div>`;
+        const errDiv = document.createElement('div');
+        errDiv.className = 'msg msg-error';
+        errDiv.textContent = `❌ ${e.message} — Try grabbing a fresh token.`;
+        resultsEl.replaceChildren(errDiv);
       }
       btn.disabled = false;
       btn.textContent = '🔍 Search Again';
