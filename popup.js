@@ -52,6 +52,35 @@ function switchTab(name) {
 }
 window.switchTab = switchTab;
 
+function appendMsgBox(container, className, text) {
+  const div = document.createElement('div');
+  div.className = className;
+  div.textContent = text;
+  container.replaceChildren(div);
+}
+
+function appendSearchHintNoPortal(container) {
+  const div = document.createElement('div');
+  div.className = 'msg msg-info';
+  div.appendChild(document.createTextNode('Navigate to a '));
+  const strong = document.createElement('strong');
+  strong.textContent = 'Stratus portal';
+  div.appendChild(strong);
+  div.appendChild(document.createTextNode(' tab to search.'));
+  container.replaceChildren(div);
+}
+
+function appendSearchHintNoToken(container) {
+  const div = document.createElement('div');
+  div.className = 'msg msg-info';
+  div.appendChild(document.createTextNode('No token saved. Go to CentralDB tab and click the '));
+  const strong = document.createElement('strong');
+  strong.textContent = 'Token tab → Grab Token';
+  div.appendChild(strong);
+  div.appendChild(document.createTextNode('.'));
+  container.replaceChildren(div);
+}
+
 async function grabToken(tabId) {
   const pageData = await chrome.scripting.executeScript({
     target: { tabId }, world: 'MAIN',
@@ -87,42 +116,148 @@ async function searchAPI(query, token) {
   return json?.data?.companies?.data || [];
 }
 
+
+// Fetches all projects once and caches them in memory for the popup session.
+// Since the endpoint doesn't support companyId filtering server-side, we pull
+// everything (limit=5000 gets all ~4,458 in one shot) and filter client-side.
+let _projectsCache = null;
+
+async function projectsAPI(companyId, token) {
+  if (!_projectsCache) {
+    const res = await fetch(
+      `https://centraldb.spectrumvoip.com:8081/api/v1/connectwise/projects?limit=5000&page=1&sortBy=estimatedStart&sortDirection=desc`,
+      { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' } }
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    _projectsCache = json?.data?.data || [];
+  }
+  return _projectsCache.filter(p => p.CompanyId === companyId);
+}
+
 function dedupeById(arr) {
   const seen = new Set();
   return arr.filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
 }
 
+// Maps CentralDB's status_name strings to a color for the status badge.
+// Statuses follow a numbering convention — we key off the number prefix.
+function projectStatusColor(status) {
+  if (!status) return '#64748b';
+  const s = status.trim().toLowerCase();
+  if (s.startsWith('2.')) return '#22c55e';  // In Progress — green
+  if (s.startsWith('1')) return '#3b82f6';   // New / Assigned — blue
+  if (s.startsWith('8.')) return '#475569';  // Closed — grey
+  if (s.startsWith('7.')) return '#ef4444';  // Cancelled — red
+  if (s.startsWith('0.')) return '#f59e0b';  // Credit not approved — yellow
+  if (s.startsWith('9.')) return '#8b5cf6';  // Demo — purple
+  return '#64748b'; // fallback
+}
+
+function createResultCard(c) {
+  const card = document.createElement('div');
+  card.className = 'result-card';
+
+  const cname = document.createElement('div');
+  cname.className = 'cname';
+  cname.textContent = c.name || '—';
+  card.appendChild(cname);
+
+  function addLabeledRow(label, text) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.appendChild(document.createTextNode(label));
+    const span = document.createElement('span');
+    span.textContent = text || '—';
+    row.appendChild(span);
+    card.appendChild(row);
+  }
+
+  addLabeledRow('Domain: ', c.Billing_Domain);
+  addLabeledRow('Phone: ', c.phoneNumber);
+
+  const statusRow = document.createElement('div');
+  statusRow.className = 'row';
+  statusRow.appendChild(document.createTextNode('Status: '));
+  const statusSpan = document.createElement('span');
+  statusSpan.className = c.Billing_Status === 'OPEN' ? 'status-open' : 'status-other';
+  statusSpan.textContent = c.Billing_Status || '—';
+  statusRow.appendChild(statusSpan);
+  card.appendChild(statusRow);
+
+  addLabeledRow('CW ID: ', c.id != null ? String(c.id) : null);
+
+  const btn = document.createElement('button');
+  btn.className = 'projects-toggle';
+  btn.setAttribute('data-cwid', String(c.id ?? ''));
+  btn.textContent = '📋 Load Projects';
+  card.appendChild(btn);
+
+  const projSec = document.createElement('div');
+  projSec.className = 'projects-section';
+  projSec.style.display = 'none';
+  card.appendChild(projSec);
+
+  return card;
+}
+
+/** @returns {DocumentFragment} */
 function renderCards(companies, company, domain) {
+  const frag = document.createDocumentFragment();
   if (!companies.length) {
     const d = document.createElement('div');
     d.className = 'msg msg-info';
     d.textContent = `No results for "${company || ''}${domain ? ` or ${domain}` : ''}"`;
-    return d.outerHTML;
+    frag.appendChild(d);
+    return frag;
   }
-  return companies.map(c => {
-    const card = document.createElement('div');
-    card.className = 'result-card';
+  for (const c of companies) {
+    frag.appendChild(createResultCard(c));
+  }
+  return frag;
+}
 
-    const t = (val, fallback = '—') => {
-      const s = document.createElement('span');
-      s.textContent = val || fallback;
-      return s.outerHTML;
-    };
+function buildPortalSearchContent(company, domain, onSearchReady) {
+  const searchContent = document.getElementById('search-content');
+  searchContent.replaceChildren();
 
-    const statusClass = c.Billing_Status === 'OPEN' ? 'status-open' : 'status-other';
+  const box = document.createElement('div');
+  box.className = 'info-box';
+  const lbl = document.createElement('div');
+  lbl.className = 'lbl';
+  lbl.textContent = 'Detected on page';
+  const val = document.createElement('div');
+  val.className = 'val';
+  if (company) {
+    val.textContent = company;
+  } else {
+    const muted = document.createElement('span');
+    muted.style.color = '#4b5563';
+    muted.textContent = 'Could not detect';
+    val.appendChild(muted);
+  }
+  const sub = document.createElement('div');
+  sub.className = 'sub';
+  if (domain) sub.textContent = `(${domain})`;
+  box.appendChild(lbl);
+  box.appendChild(val);
+  box.appendChild(sub);
 
-    card.innerHTML = `
-      <div class="cname"></div>
-      <div class="row">Domain: ${t(c.Billing_Domain)}</div>
-      <div class="row">Phone: ${t(c.phoneNumber)}</div>
-      <div class="row">Status: <span class="${statusClass}"></span></div>
-      <div class="row">CW ID: ${t(c.id)}</div>`;
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-blue';
+  btn.id = 'btn-search';
+  const canSearch = !!(company || domain);
+  btn.disabled = !canSearch;
+  btn.textContent = canSearch ? '🔍 Search CentralDB' : '⚠️ Nothing detected';
 
-    card.querySelector('.cname').textContent = c.name || '—';
-    card.querySelector(`.${statusClass}`).textContent = c.Billing_Status || '—';
+  const results = document.createElement('div');
+  results.id = 'results';
 
-    return card.outerHTML;
-  }).join('');
+  searchContent.appendChild(box);
+  searchContent.appendChild(btn);
+  searchContent.appendChild(results);
+
+  onSearchReady(btn, results);
 }
 
 (async () => {
@@ -158,17 +293,17 @@ function renderCards(companies, company, domain) {
 
   grabBtn.addEventListener('click', async () => {
     if (!isCentralDB) {
-      tokenMsg.innerHTML = `<div class="msg msg-error">❌ You need to be on the CentralDB tab to grab the token.</div>`;
+      appendMsgBox(tokenMsg, 'msg msg-error', '❌ You need to be on the CentralDB tab to grab the token.');
       return;
     }
     grabBtn.disabled = true;
     grabBtn.textContent = '⏳ Grabbing...';
-    tokenMsg.innerHTML = '';
+    tokenMsg.replaceChildren();
     try {
       const token = await grabToken(tab.id);
       savedToken = token;
       updateTokenBar(token);
-      tokenMsg.innerHTML = `<div class="msg msg-success">✅ Token grabbed automatically!</div>`;
+      appendMsgBox(tokenMsg, 'msg msg-success', '✅ Token grabbed automatically!');
       grabBtn.textContent = '⚡ Grab Again';
       setTimeout(() => switchTab('search'), 1000);
     } catch(e) {
@@ -187,7 +322,7 @@ function renderCards(companies, company, domain) {
       const token = await grabToken(tab.id);
       savedToken = token;
       updateTokenBar(token);
-      tokenMsg.innerHTML = `<div class="msg msg-success">✅ Token auto-grabbed!</div>`;
+      appendMsgBox(tokenMsg, 'msg msg-success', '✅ Token auto-grabbed!');
     } catch(_) {
       // Silent fail — user can click manually
     }
@@ -201,7 +336,7 @@ function renderCards(companies, company, domain) {
     savedToken = raw;
     updateTokenBar(raw);
     document.getElementById('token-input').value = '';
-    tokenMsg.innerHTML = `<div class="msg msg-success">✅ Token saved!</div>`;
+    appendMsgBox(tokenMsg, 'msg msg-success', '✅ Token saved!');
     setTimeout(() => switchTab('search'), 1000);
   });
 
@@ -209,7 +344,7 @@ function renderCards(companies, company, domain) {
     await chrome.storage.local.remove('bearerToken');
     savedToken = null;
     updateTokenBar(null);
-    tokenMsg.innerHTML = `<div class="msg msg-info">Token cleared.</div>`;
+    appendMsgBox(tokenMsg, 'msg msg-info', 'Token cleared.');
   });
 
   // ── Search panel ──────────────────────────────────────────
@@ -223,26 +358,29 @@ function renderCards(companies, company, domain) {
   }
 
   if (contextMenuResults && Date.now() - contextMenuResults.timestamp < 60000) {
-      chrome.storage.local.remove('contextMenuResults');
-      chrome.action.setBadgeText({ text: '' }); // ← add this line
-      switchTab('search');
-    searchContent.innerHTML = `
-      <div class="info-box">
-        <div class="lbl">Context menu search</div>
-        <div class="val"></div>
-      </div>
-      <div id="results"></div>`;
-    // textContent for query — never innerHTML
-    searchContent.querySelector('.val').textContent = contextMenuResults.query;
-    searchContent.querySelector('#results').innerHTML = renderCards(
-      contextMenuResults.results,
-      contextMenuResults.query,
-      null
-    );
+    chrome.storage.local.remove('contextMenuResults');
+    chrome.action.setBadgeText({ text: '' });
+    switchTab('search');
+    searchContent.replaceChildren();
+    const box = document.createElement('div');
+    box.className = 'info-box';
+    const lbl = document.createElement('div');
+    lbl.className = 'lbl';
+    lbl.textContent = 'Context menu search';
+    const val = document.createElement('div');
+    val.className = 'val';
+    val.textContent = contextMenuResults.query ?? '';
+    box.appendChild(lbl);
+    box.appendChild(val);
+    const results = document.createElement('div');
+    results.id = 'results';
+    results.replaceChildren(renderCards(contextMenuResults.results, contextMenuResults.query, null));
+    searchContent.appendChild(box);
+    searchContent.appendChild(results);
   } else if (!isPortal) {
-    searchContent.innerHTML = `<div class="msg msg-info">Navigate to a <strong>Stratus portal</strong> tab to search.</div>`;
+    appendSearchHintNoPortal(searchContent);
   } else if (!savedToken) {
-    searchContent.innerHTML = `<div class="msg msg-info">No token saved. Go to CentralDB tab and click the <strong>Token tab → Grab Token</strong>.</div>`;
+    appendSearchHintNoToken(searchContent);
   } else {
     let company = null, domain = null;
     try {
@@ -259,51 +397,44 @@ function renderCards(companies, company, domain) {
       domain = res?.[0]?.result?.domain || null;
     } catch(_) {}
 
-    searchContent.innerHTML = `
-      <div class="info-box">
-        <div class="lbl">Detected on page</div>
-        <div class="val">${company || '<span style="color:#4b5563">Could not detect</span>'}</div>
-        <div class="sub">${domain ? `(${domain})` : ''}</div>
-      </div>
-      <button class="btn btn-blue" id="btn-search" ${!company && !domain ? 'disabled' : ''}>
-        ${!company && !domain ? '⚠️ Nothing detected' : '🔍 Search CentralDB'}
-      </button>
-      <div id="results"></div>`;
+    buildPortalSearchContent(company, domain, (btn, resultsEl) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.replaceChildren();
+        const spin = document.createElement('span');
+        spin.className = 'spinner';
+        btn.appendChild(spin);
+        btn.appendChild(document.createTextNode('Searching...'));
 
-    document.getElementById('btn-search')?.addEventListener('click', async () => {
-      const btn = document.getElementById('btn-search');
-      const resultsEl = document.getElementById('results');
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner"></span>Searching...';
+        // Token expiry preflight
+        try {
+          const { exp } = JSON.parse(atob(savedToken.split('.')[1]));
+          if (exp * 1000 < Date.now()) {
+            const errDiv = document.createElement('div');
+            errDiv.className = 'msg msg-error';
+            errDiv.textContent = '⚠️ Token is expired. Grab a fresh one from the Token tab.';
+            resultsEl.replaceChildren(errDiv);
+            btn.disabled = false;
+            btn.textContent = '🔍 Search Again';
+            return;
+          }
+        } catch(_) {}
 
-      // Token expiry preflight
-      try {
-        const { exp } = JSON.parse(atob(savedToken.split('.')[1]));
-        if (exp * 1000 < Date.now()) {
+        try {
+          const [byName, byDomain] = await Promise.all([
+            company ? searchAPI(company, savedToken) : Promise.resolve([]),
+            domain  ? searchAPI(domain,  savedToken) : Promise.resolve([])
+          ]);
+          resultsEl.replaceChildren(renderCards(dedupeById([...byName, ...byDomain]), company, domain));
+        } catch(e) {
           const errDiv = document.createElement('div');
           errDiv.className = 'msg msg-error';
-          errDiv.textContent = '⚠️ Token is expired. Grab a fresh one from the Token tab.';
+          errDiv.textContent = `❌ ${e.message} — Try grabbing a fresh token.`;
           resultsEl.replaceChildren(errDiv);
-          btn.disabled = false;
-          btn.textContent = '🔍 Search Again';
-          return;
         }
-      } catch(_) {}
-
-      try {
-        const [byName, byDomain] = await Promise.all([
-          company ? searchAPI(company, savedToken) : Promise.resolve([]),
-          domain  ? searchAPI(domain,  savedToken) : Promise.resolve([])
-        ]);
-        resultsEl.innerHTML = renderCards(dedupeById([...byName, ...byDomain]), company, domain);
-      } catch(e) {
-        const errDiv = document.createElement('div');
-        errDiv.className = 'msg msg-error';
-        errDiv.textContent = `❌ ${e.message} — Try grabbing a fresh token.`;
-        resultsEl.replaceChildren(errDiv);
-      }
-      btn.disabled = false;
-      btn.textContent = '🔍 Search Again';
+        btn.disabled = false;
+        btn.textContent = '🔍 Search Again';
+      });
     });
   }
 })();

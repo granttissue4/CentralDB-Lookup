@@ -11,8 +11,8 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === 'CDB_TOKEN' && msg.token) {
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg.type === 'CDB_TOKEN' && msg.token && sender.id === chrome.runtime.id) {
     chrome.storage.local.set({ bearerToken: msg.token, tokenSavedAt: Date.now() });
   }
 });

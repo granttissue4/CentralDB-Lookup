@@ -1,15 +1,23 @@
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function section(title, rows) {
   return `
     <div class="section">
-      <h3>${title}</h3>
+      <h3>${escapeHtml(title)}</h3>
       ${rows.map(r => `<div class="row">${r}</div>`).join('')}
     </div>`;
 }
 
-function ok(label, val) { return `<span class="ok">✅ ${label}:</span> <span class="val">${val}</span>`; }
-function fail(label, val) { return `<span class="fail">❌ ${label}:</span> <span class="val">${val}</span>`; }
-function warn(label, val) { return `<span class="warn">⚠️ ${label}:</span> <span class="val">${val}</span>`; }
-function info(label, val) { return `<span style="color:#64748b">${label}:</span> <span class="val">${val}</span>`; }
+function ok(label, val) { return `<span class="ok">✅ ${escapeHtml(label)}:</span> <span class="val">${escapeHtml(val)}</span>`; }
+function fail(label, val) { return `<span class="fail">❌ ${escapeHtml(label)}:</span> <span class="val">${escapeHtml(val)}</span>`; }
+function warn(label, val) { return `<span class="warn">⚠️ ${escapeHtml(label)}:</span> <span class="val">${escapeHtml(val)}</span>`; }
+function info(label, val) { return `<span style="color:#64748b">${escapeHtml(label)}:</span> <span class="val">${escapeHtml(val)}</span>`; }
 
 document.getElementById('btn-run').addEventListener('click', async () => {
   const out = document.getElementById('output');
