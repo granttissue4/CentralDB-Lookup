@@ -1,17 +1,24 @@
 {
   "manifest_version": 3,
   "name": "CentralDB Lookup",
-  "version": "3.0",
+  "version": "3.0.1",
   "description": "Auto-grabs your token from CentralDB and looks up companies from the Stratus portal.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "centraldb-lookup@spectrumvoip.com",
+      "strict_min_version": "128.0"
+    }
+  },
   "permissions": ["activeTab", "storage", "scripting", "contextMenus"],
   "content_scripts": [
     {
       "matches": ["https://centraldb.spectrumvoip.com/*"],
-      "js": ["bridge.js", "content-centraldb.js"],
+      "js": ["ext-api.js", "bridge.js", "content-centraldb.js"],
       "run_at": "document_start"
     }
   ],
   "background": {
+    "scripts": ["ext-api.js", "background.js"],
     "service_worker": "background.js"
   },
   "host_permissions": [

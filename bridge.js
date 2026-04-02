@@ -1,4 +1,4 @@
-// Runs in ISOLATED world — can access chrome.storage
+// Runs in ISOLATED world — can access ext.storage
 // Listens for token events dispatched by the MAIN world content script (if present).
 // Only persist values that look like JWT access tokens to limit DOM-based poisoning.
 function normalizeBearerToken(detail) {
@@ -12,6 +12,6 @@ function normalizeBearerToken(detail) {
 document.addEventListener('__cdb_save_token', (e) => {
   const token = normalizeBearerToken(e.detail);
   if (token) {
-    chrome.storage.local.set({ bearerToken: token, tokenSavedAt: Date.now() });
+    ext.storage.local.set({ bearerToken: token, tokenSavedAt: Date.now() });
   }
 });

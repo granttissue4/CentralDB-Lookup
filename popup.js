@@ -82,7 +82,7 @@ function appendSearchHintNoToken(container) {
 }
 
 async function grabToken(tabId) {
-  const pageData = await chrome.scripting.executeScript({
+  const pageData = await ext.scripting.executeScript({
     target: { tabId }, world: 'MAIN',
     func: () => {
       try {
@@ -103,7 +103,7 @@ async function grabToken(tabId) {
   if (pd?.error) throw new Error(pd.error);
   const token = await decryptMSALToken(pd.baseKey, pd.nonce, pd.data, pd.clientId);
   if (!token) throw new Error('Decryption succeeded but no token found');
-  await chrome.storage.local.set({ bearerToken: token, tokenSavedAt: Date.now() });
+  await ext.storage.local.set({ bearerToken: token, tokenSavedAt: Date.now() });
   return token;
 }
 
@@ -261,12 +261,12 @@ function buildPortalSearchContent(company, domain, onSearchReady) {
 }
 
 (async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
   const url = new URL(tab.url);
   const isCentralDB = url.hostname === 'centraldb.spectrumvoip.com';
   const isPortal = PORTAL_HOSTS.includes(url.hostname) && url.pathname.includes('/portal');
 
-  const stored = await chrome.storage.local.get('bearerToken');
+  const stored = await ext.storage.local.get('bearerToken');
   let savedToken = stored.bearerToken || null;
 
   // Evict expired token rather than leaving a stale credential in storage
@@ -274,7 +274,7 @@ function buildPortalSearchContent(company, domain, onSearchReady) {
     try {
       const { exp } = JSON.parse(atob(savedToken.split('.')[1]));
       if (exp * 1000 < Date.now()) {
-        await chrome.storage.local.remove('bearerToken');
+        await ext.storage.local.remove('bearerToken');
         savedToken = null;
       }
     } catch(_) {} // non-JWT token — leave it alone
@@ -332,7 +332,7 @@ function buildPortalSearchContent(company, domain, onSearchReady) {
   document.getElementById('btn-save-token').addEventListener('click', async () => {
     let raw = document.getElementById('token-input').value.trim().replace(/^[Bb]earer\s+/, '');
     if (!raw) return;
-    await chrome.storage.local.set({ bearerToken: raw, tokenSavedAt: Date.now() });
+    await ext.storage.local.set({ bearerToken: raw, tokenSavedAt: Date.now() });
     savedToken = raw;
     updateTokenBar(raw);
     document.getElementById('token-input').value = '';
@@ -341,7 +341,7 @@ function buildPortalSearchContent(company, domain, onSearchReady) {
   });
 
   document.getElementById('btn-clear-token').addEventListener('click', async () => {
-    await chrome.storage.local.remove('bearerToken');
+    await ext.storage.local.remove('bearerToken');
     savedToken = null;
     updateTokenBar(null);
     appendMsgBox(tokenMsg, 'msg msg-info', 'Token cleared.');
@@ -351,15 +351,15 @@ function buildPortalSearchContent(company, domain, onSearchReady) {
   const searchContent = document.getElementById('search-content');
 
   // Pick up any recent context menu search results (within last 60s)
-  const { pendingSearch, contextMenuResults } = await chrome.storage.local.get(['pendingSearch', 'contextMenuResults']);
+  const { pendingSearch, contextMenuResults } = await ext.storage.local.get(['pendingSearch', 'contextMenuResults']);
 
   if (pendingSearch) {
-    chrome.storage.local.remove('pendingSearch');
+    ext.storage.local.remove('pendingSearch');
   }
 
   if (contextMenuResults && Date.now() - contextMenuResults.timestamp < 60000) {
-    chrome.storage.local.remove('contextMenuResults');
-    chrome.action.setBadgeText({ text: '' });
+    ext.storage.local.remove('contextMenuResults');
+    ext.action.setBadgeText({ text: '' });
     switchTab('search');
     searchContent.replaceChildren();
     const box = document.createElement('div');
@@ -384,7 +384,7 @@ function buildPortalSearchContent(company, domain, onSearchReady) {
   } else {
     let company = null, domain = null;
     try {
-      const res = await chrome.scripting.executeScript({
+      const res = await ext.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
           const company = document.querySelector('.domain-description')?.textContent?.trim() || null;

@@ -17,7 +17,7 @@
     }
 
     if (token && token.startsWith('Bearer ')) {
-      chrome.storage.local.set({ bearerToken: token, tokenSavedAt: Date.now() });
+      ext.storage.local.set({ bearerToken: token, tokenSavedAt: Date.now() });
     }
 
     return originalFetch.apply(this, args);
@@ -29,7 +29,7 @@
 
   XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
     if (name.toLowerCase() === 'authorization' && value.startsWith('Bearer ')) {
-      chrome.storage.local.set({ bearerToken: value, tokenSavedAt: Date.now() });
+      ext.storage.local.set({ bearerToken: value, tokenSavedAt: Date.now() });
     }
     return originalSetHeader.apply(this, arguments);
   };

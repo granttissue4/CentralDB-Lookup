@@ -26,7 +26,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
   const results = [];
 
   // 1. Current tab info
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
   const url = new URL(tab.url);
   results.push(section('📄 Current Tab', [
     info('URL', tab.url),
@@ -38,7 +38,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
   ]));
 
   // 2. Saved token in storage
-  const stored = await chrome.storage.local.get(['bearerToken', 'tokenSavedAt']);
+  const stored = await ext.storage.local.get(['bearerToken', 'tokenSavedAt']);
   const token = stored.bearerToken;
   const tokenRows = [];
   if (token) {
@@ -65,7 +65,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
   // 3. Check content script + window global (only works on centraldb)
   if (url.hostname === 'centraldb.spectrumvoip.com') {
     try {
-      const scriptResults = await chrome.scripting.executeScript({
+      const scriptResults = await ext.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
           return {
@@ -101,7 +101,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
 
         // If token was captured, save it!
         if (d.capturedFull) {
-          await chrome.storage.local.set({ bearerToken: d.capturedFull, tokenSavedAt: Date.now() });
+          await ext.storage.local.set({ bearerToken: d.capturedFull, tokenSavedAt: Date.now() });
           pageRows.push(ok('AUTO-SAVED', 'Token saved to storage!'));
         }
 

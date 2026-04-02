@@ -1,180 +1,90 @@
-[README.md](https://github.com/user-attachments/files/26354650/README.md)
-# CentralDB Lookup — Edge Extension
+# CentralDB Lookup (browser extension)
 
-A Microsoft Edge browser extension for SpectrumVoIP support staff. When you're viewing a customer account in the Stratus portal, it automatically searches CentralDB and returns the matching ConnectWise company — bridging the gap between Stratus customer names and ConnectWise account names.
+Manifest V3 extension that saves a CentralDB bearer token and runs company lookups from Stratus portal tabs, with optional context-menu search.
 
----
+This repository is a **fork** of an extension originally built by a colleague. This fork adds cross-browser support (Chrome + Firefox), security hardening for untrusted page/API data, and maintenance docs. **Replace the placeholder below** with your friend’s name and upstream URL when you have them.
 
-## The Problem
+**Upstream / attribution:** Original author: _(add name)_. Original source: _(add repo URL if public)_. Fork changes include Firefox MV3 `background.scripts` + Chromium `service_worker`, `ext-api.js` shim, DOM-safe popup rendering, JWT validation on token bridge events, and stricter message handling in the background script.
 
-Customer names in **Stratus** often don't match the names in **ConnectWise** (our ticketing software). Finding the right ConnectWise account means manually copying the domain or company name, opening CentralDB, and searching — every single time.
+> If the original project used a different license, reconcile [LICENSE](LICENSE) with that upstream license before redistributing.
 
-## The Solution
+## Requirements
 
-Open the extension while on a Stratus portal tab. It reads the customer name and domain from the page, searches CentralDB automatically, and shows you the matching ConnectWise company — including the CW ID you need to pull up the right ticket.
+- **Google Chrome** or **Chromium** (recent MV3-capable build), or **Mozilla Firefox 128+** (Gecko `strict_min_version` in `manifest.json`; needed for `scripting.executeScript` with `world: "MAIN"` for token decryption).
 
----
+## Install (development)
 
-## Features
+### Chrome / Chromium
 
--  **Auto-detects** customer name and domain from the active Stratus portal tab
--  **Auto-grabs your auth token** from CentralDB using MSAL cache decryption — no manual copy/paste
--  **Token status indicator** — shows time remaining before expiry with color-coded dot (green / yellow / red)
--  **Manual token fallback** — paste a Bearer token directly if auto-grab fails
--  **Result cards** — shows company name, billing domain, phone, billing status, and ConnectWise ID
--  **Deduplication** — searches by both company name and domain, merges and dedupes results by ID
-
----
-
-## How It Works
-
-### Token Acquisition
-
-CentralDB authenticates via **Microsoft MSAL (Azure AD)**. The token is stored in the browser encrypted — the encrypted blob lives in `localStorage` and the decryption key lives in a cookie. Neither is useful alone.
-
-When you open the extension on the CentralDB tab, it:
-
-1. Reads the encrypted token entry from `localStorage`
-2. Reads the encryption key from the `msal.cache.encryption` cookie
-3. Derives a final AES key using **HKDF (SHA-256)**
-4. Decrypts the token using **AES-GCM**
-5. Saves the resulting JWT to `chrome.storage.local`
-
-The token is a standard JWT — the extension reads the `exp` claim to display how much time is left before it expires (typically ~84 minutes).
-
-### Page Scraping (Stratus Portal)
-
-On portal tabs, the extension reads:
-- **Company name** from `.domain-description`
-- **Domain** from `.domain-message-text` — extracted via regex targeting a valid domain pattern (e.g. `example.com`)
-
-### Search
-
-Both the company name and domain are sent as parallel requests to:
-```
-GET https://centraldb.spectrumvoip.com:8081/api/v1/master-search?search=<query>&module=connectwise
-```
-Results are merged and deduplicated by ConnectWise company ID.
-
----
-
-## Installation
-
-### Microsoft Edge
-
-> This extension is not published to the Edge Add-ons store. Install it in Developer Mode.
-
-1. Download and unzip the extension folder
-2. Open Edge and navigate to `edge://extensions`
-3. Enable **Developer mode** (toggle in the bottom-left)
-4. Click **Load unpacked**
-5. Select the unzipped `centraldb-fixed` folder
-6. The extension icon will appear in your toolbar
+1. Open `chrome://extensions` (or `edge://extensions` in Microsoft Edge).
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and select this folder (the directory that contains `manifest.json`).
 
 ### Firefox
-> This portion for this fork is a work in progress, and may not work as intended.
-> This extension is not published to the Firefox Add-ons store. Install it manually using an `.xpi` file.
 
-**Standard Install (Signed XPI)**
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Under **Temporary Extensions**, click **Load Temporary Add-on…** and choose `manifest.json`.
 
-1. Download the `.xpi` file
-2. Open Mozilla Firefox
-3. Drag and drop the `.xpi` file into the Firefox window — OR:
-   - Navigate to `about:addons`
-   - Click the ⚙️ gear icon
-   - Select **Install Add-on From File**
-   - Choose the `.xpi` file
-4. Click **Add** when prompted for permissions
+Temporary add-ons in Firefox are removed when the browser fully exits; load again as needed, or use a signed package for persistence.
 
-**Developer Install (Unsigned XPI)**
+## Permissions and host access
 
-If the extension is unsigned, Firefox will block installation on stable builds.
+| Manifest piece | Why it’s there |
+|----------------|----------------|
+| `activeTab` | Run `scripting.executeScript` in the active tab for portal DOM reads and CentralDB token extraction. |
+| `storage` | Save bearer token, pending/context-menu search results, timestamps. |
+| `scripting` | Inject scripts into allowed tabs (including `MAIN` world on CentralDB for MSAL/token reads). |
+| `contextMenus` | “Search CentralDB for selection” background action. |
+| **Host permissions** (CentralDB + Stratus + `st1-*` hosts) | Call your org APIs and match portal origins used in the popup’s allowlist. |
 
-*Option 1 — Temporary Load*
+## Icons
 
-1. Open Firefox and navigate to `about:debugging`
-2. Click **This Firefox**
-3. Click **Load Temporary Add-on**
-4. Select the `.xpi` file
+`icons/icon16.png`, `icon48.png`, and `icon128.png` are simple solid placeholders so the manifest validates. Swap them for branded artwork before any public store submission.
 
-> Note: Temporary add-ons are removed when Firefox is closed. For a permanent install, the extension must be signed.
+## Optional developer diagnostics
 
-*Option 2 — Disable Signature Enforcement (Firefox Developer Edition / Nightly only)*
+`debug.html` / `debug.js` are **not** registered in `manifest.json`. They are only useful when opened in a dev context alongside the extension APIs (e.g. while iterating locally). Do not rely on them in production builds; omit them from zip bundles you give to non-developers if you want a minimal package.
 
-1. Navigate to `about:config`
-2. Set `xpinstall.signatures.required` to `false`
-3. Install the `.xpi` normally via `about:addons`
+## Smoke checklist (after any change)
 
----
+Run through this on **both** Chrome and Firefox after edits, especially to `manifest.json`, `background.js`, `popup.js`, or `ext-api.js`:
 
-## Usage
+1. Reload the extension.
+2. On **CentralDB** (`centraldb.spectrumvoip.com`): open the popup, **Token** tab — grab or confirm token.
+3. On a **Stratus portal** tab (`/portal` path, host in `PORTAL_HOSTS` in `popup.js`): open popup, run **Search**.
+4. Select text on a page, context menu → **Search CentralDB for …**, then open the popup and confirm results or badge state.
 
-### First Time — Grab a Token
+## Versioning
 
-1. Open a new tab and navigate to `centraldb.spectrumvoip.com`
-2. Let the page fully load
-3. Click the extension icon — it will **auto-grab the token** from the page
-4. The token bar will turn green with time remaining
+Bump `"version"` in `manifest.json` whenever you hand a build to someone else (semver: `MAJOR.MINOR.PATCH`). Record changes in [CHANGELOG.md](CHANGELOG.md).
 
-> **Token expiring?** Go back to the CentralDB tab, do anything that triggers an API call (search, navigate), or hard refresh (`Ctrl+Shift+R`). The extension intercepts the token automatically.
+## Syncing from upstream (friend’s repo)
 
-### Searching
+If the original project lives in a Git remote you can merge from:
 
-1. Navigate to a customer account in the **Stratus portal**
-2. Click the extension icon
-3. The detected company name and domain will appear
-4. Click **Search CentralDB**
-5. Matching ConnectWise companies appear as result cards
+1. Add the remote once:  
+   `git remote add upstream https://example.com/original/centraldb-extension.git`  
+   (use the real URL.)
+2. Fetch: `git fetch upstream`
+3. Merge or cherry-pick:  
+   `git merge upstream/main`  
+   (or their default branch name), or cherry-pick specific commits.
+4. **Resolve conflicts** carefully in files this fork changed heavily: `manifest.json`, `background.js`, `popup.js`, `bridge.js`, `ext-api.js`.
+5. Run the **smoke checklist** above on Chrome and Firefox before sharing the build.
 
----
+If there is no public upstream, skip this section.
 
-## File Structure
+## Project layout (short)
 
-```
-centraldb-fixed/
-├── manifest.json          # Extension config, permissions, content script declarations
-├── popup.html             # Extension popup UI
-├── popup.js               # Main logic — token grab, page scrape, search, render
-├── background.js          # Service worker — persists token messages to storage
-├── bridge.js              # Isolated world bridge — relays token events to chrome.storage
-├── content.js             # Injected on CentralDB — floating "Copy Token" button + interceptors
-├── content-centraldb.js   # Injected on CentralDB at document_start — fetch/XHR interceptors
-├── debug.html             # Debug panel UI
-├── debug.js               # Debug tooling
-└── icons/
-    ├── icon16.png
-    ├── icon48.png
-    └── icon128.png
-```
+| File | Role |
+|------|------|
+| `manifest.json` | MV3 manifest; Gecko + dual `background` for Firefox/Chrome |
+| `ext-api.js` | `globalThis.ext = browser \|\| chrome` for content scripts, popup, debug |
+| `background.js` | Context menus, context-menu API search, badge, storage |
+| `popup.html` / `popup.js` | Main UI, search, token grab (MSAL decrypt) |
+| `bridge.js` | Isolated world listener for token events |
+| `content-centraldb.js` | CentralDB page: intercept fetch/XHR for bearer token |
 
----
+## License
 
-## Permissions
-
-| Permission | Why |
-|---|---|
-| `activeTab` | Read page content from the current tab |
-| `storage` | Save the Bearer token between popup opens |
-| `scripting` | Execute scripts on CentralDB/Stratus tabs to grab token and scrape page |
-| Host permissions | Scope access to SpectrumVoIP domains only |
-
----
-
-## Security Notes
-
-- The Bearer token is stored **locally in your browser only** (`chrome.storage.local`) — it is never sent to any external server
-- The token is only used to authenticate requests to `centraldb.spectrumvoip.com` — the same destination you'd use manually
-- Tokens expire automatically (~84 minutes based on Azure AD configuration)
-- Do not share the extension with a token already saved in storage, and avoid pasting tokens into chat or tickets
-
----
-
-## Troubleshooting
-
-| Issue | Fix |
-|---|---|
-| HTTP 500 on search | Grab a fresh token from the CentralDB tab |
-| "No token saved" | Navigate to CentralDB, open the popup, token should auto-grab |
-| Token time not updating | Trigger an API call on the CentralDB tab (search something) or hard refresh (`Ctrl+Shift+R`) |
-| Nothing detected on page | The portal page selector may not match — check that you're on an active domain/account page |
-| Domain extracted incorrectly | Ensure the page text contains a valid domain in parentheses e.g. `(example.com)` |
+See [LICENSE](LICENSE). Align with the original author’s wishes if their project specified a different license.
